@@ -20,32 +20,41 @@ import (
 //go:embed *.yaml
 var ConfigsFS embed.FS
 
+const healthCheckTimeout = 15 * time.Second
+
 func TestMain(m *testing.M) {
 	if err := integration.BuildConfig("E2E_", "e2e", ConfigsFS, &testdata.Cfg); err != nil {
 		slog.Error("failed to build config", "error", err)
 		os.Exit(1)
 	}
 
-	var stopApp func() error
+	var cancel context.CancelFunc
+	var cleanup func()
 	if testdata.Cfg.App.AutoStart {
-		stopApp = startApp()
-	}
-
-	code := m.Run()
-	if stopApp != nil {
-		if err := stopApp(); err != nil {
-			slog.Error("failed to stop app", "err", err)
+		var err error
+		cancel, cleanup, err = startApp()
+		if err != nil {
+			slog.Error("failed to start app", "err", err)
 			os.Exit(1)
 		}
 	}
+
+	code := m.Run()
+
+	if cancel != nil {
+		cancel()
+	}
+	if cleanup != nil {
+		cleanup()
+	}
+
 	os.Exit(code)
 }
 
-func startApp() func() error {
+func startApp() (context.CancelFunc, func(), error) {
 	pfsenseURL, pfsenseCloseFunc := testdata.MockPfsenseServer()
 
 	os.Setenv("APP_PFSENSE_URL", pfsenseURL)
-
 	os.Setenv("APP_TELEMETRY_METRICS_ENABLED", "false")
 
 	healthPort := testdata.GetFreePort()
@@ -53,32 +62,61 @@ func startApp() func() error {
 
 	app, err := pkg.NewManager()
 	if err != nil {
-		slog.Error("failed to start app", "err", err)
-		os.Exit(1)
+		pfsenseCloseFunc()
+		return nil, nil, fmt.Errorf("failed to create manager: %w", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	appErrCh := make(chan error, 1)
 	go func() {
 		if err := app.Start(ctx); err != nil {
-			slog.Error("failed to start app", "err", err)
-			os.Exit(1)
+			appErrCh <- err
 		}
+		close(appErrCh)
 	}()
-	for {
-		r, err := http.Get(fmt.Sprintf("http://localhost:%d/readyz", healthPort)) //nolint:noctx
-		if err == nil && r.StatusCode == http.StatusOK {
-			break
-		}
-		r.Body.Close()
-		time.Sleep(1 * time.Second)
+
+	if err := waitForReady(ctx, healthPort, appErrCh); err != nil {
+		cancel()
+		pfsenseCloseFunc()
+		return nil, nil, fmt.Errorf("health check failed: %w", err)
 	}
 
 	slog.Info("app started for e2e tests")
 
-	return func() error {
-		pfsenseCloseFunc()
-		cancel()
-		return nil
+	return cancel, pfsenseCloseFunc, nil
+}
+
+func waitForReady(ctx context.Context, healthPort int, appErrCh <-chan error) error {
+	ctx, cancel := context.WithTimeout(ctx, healthCheckTimeout)
+	defer cancel()
+
+	healthURL := fmt.Sprintf("http://localhost:%d/readyz", healthPort)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for readyz endpoint after %v", healthCheckTimeout)
+		case err := <-appErrCh:
+			if err != nil {
+				return fmt.Errorf("app failed to start: %w", err)
+			}
+			return fmt.Errorf("app exited unexpectedly")
+		case <-ticker.C:
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
+			if err != nil {
+				continue
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				continue
+			}
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+		}
 	}
 }
