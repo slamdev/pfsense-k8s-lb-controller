@@ -1,0 +1,16 @@
+actuator:
+  port: 8080
+telemetry:
+  logs:
+    level: INFO
+    format: text
+  metrics:
+    output: noop
+  traces:
+    output: noop
+pfsense:
+  url: http://localhost
+  insecure: true
+  username: admin
+  password: admin
+dryRun: true
