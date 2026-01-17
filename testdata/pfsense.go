@@ -4,13 +4,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-
-	"github.com/slamdev/pfsense-k8s-lb-controller/pkg/integration"
 )
 
 func MockPfsenseServer() (string, func()) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", integration.HandleHTTPNotFound)
+	//mux.HandleFunc("/", integration.HandleHTTPNotFound)
 
 	srv := httptest.NewUnstartedServer(mux)
 	// httptest server binds to 127.0.0.1 so it is not accessible from docker containers

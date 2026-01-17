@@ -1,13 +1,13 @@
-actuator:
-  port: 8080
 telemetry:
   logs:
-    level: INFO
+    level: DEBUG
     format: text
   metrics:
-    output: noop
-  traces:
-    output: noop
+    enabled: true
+    bindAddress: ":8080"
+  health:
+    enabled: true
+    bindAddress: ":8181"
 pfsense:
   url: http://localhost
   insecure: true

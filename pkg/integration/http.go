@@ -1,170 +1,13 @@
 package integration
 
 import (
-	"context"
 	"crypto/tls"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"log/slog"
 	"net/http"
-	"runtime/debug"
 	"time"
-
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
 
 	"github.com/hashicorp/go-cleanhttp"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
-
-type HTTPServer interface {
-	Start() error
-	Stop(ctx context.Context) error
-}
-
-type httpServer struct {
-	srv *http.Server
-}
-
-func NewHTTPServer(port int32, handler http.Handler) HTTPServer {
-	srv := http.Server{
-		Addr: fmt.Sprintf(":%d", port), Handler: handler,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  120 * time.Second,
-	}
-	return &httpServer{srv: &srv}
-}
-
-func (h *httpServer) Start() (err error) {
-	slog.Info("starting http server", "addr", h.srv.Addr)
-	if err = h.srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("failed to start http server: %w", err)
-	}
-	return nil
-}
-
-func (h *httpServer) Stop(ctx context.Context) error {
-	if err := h.srv.Shutdown(ctx); err != nil {
-		return fmt.Errorf("failed to shutdown http server: %w", err)
-	}
-	return nil
-}
-
-func HandleHTTPBadRequest(w http.ResponseWriter, r *http.Request, err error) {
-	status := http.StatusBadRequest
-	p := createAndRecordProblemDetail(r.Context(), status, err)
-	writeProblem(w, r, p)
-}
-
-func HandleHTTPNotFound(w http.ResponseWriter, r *http.Request) {
-	HandleHTTPNotFoundWithError(w, r, nil)
-}
-
-func HandleHTTPNotFoundWithError(w http.ResponseWriter, r *http.Request, err error) {
-	status := http.StatusNotFound
-	p := createAndRecordProblemDetail(r.Context(), status, err)
-	writeProblem(w, r, p)
-}
-
-func HandleHTTPForbidden(w http.ResponseWriter, r *http.Request, err error) {
-	status := http.StatusForbidden
-	p := createAndRecordProblemDetail(r.Context(), status, err)
-	writeProblem(w, r, p)
-}
-
-func HandleHTTPUnauthorized(w http.ResponseWriter, r *http.Request, err error) {
-	status := http.StatusUnauthorized
-	p := createAndRecordProblemDetail(r.Context(), status, err)
-	writeProblem(w, r, p)
-}
-
-func HandleHTTPConflict(w http.ResponseWriter, r *http.Request, err error) {
-	status := http.StatusConflict
-	p := createAndRecordProblemDetail(r.Context(), status, err)
-	writeProblem(w, r, p)
-}
-
-func HandleHTTPUnprocessableEntity(w http.ResponseWriter, r *http.Request, err error) {
-	status := http.StatusUnprocessableEntity
-	p := createAndRecordProblemDetail(r.Context(), status, err)
-	writeProblem(w, r, p)
-}
-
-func HandleHTTPServerError(w http.ResponseWriter, r *http.Request, err error) {
-	slog.ErrorContext(r.Context(), "unexpected error occurred", "err", err, "stack", string(debug.Stack()))
-
-	status := http.StatusInternalServerError
-	p := createAndRecordProblemDetail(r.Context(), status, err)
-	writeProblem(w, r, p)
-}
-
-func HandleHTTPCommonError(w http.ResponseWriter, r *http.Request, err error) {
-	if IsValidationError(err) {
-		HandleHTTPBadRequest(w, r, err)
-		return
-	}
-	if IsMissingEntityError(err) {
-		HandleHTTPNotFoundWithError(w, r, err)
-		return
-	}
-	if IsResourceConflictError(err) {
-		HandleHTTPConflict(w, r, err)
-		return
-	}
-	if IsAccessDeniedError(err) {
-		HandleHTTPForbidden(w, r, err)
-		return
-	}
-	HandleHTTPServerError(w, r, err)
-}
-
-func writeProblem(w http.ResponseWriter, r *http.Request, p ProblemDetailV1) {
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(p.Status)
-	if err := json.NewEncoder(w).Encode(p); err != nil {
-		slog.ErrorContext(r.Context(), "failed to write problem to response", "err", err)
-	}
-}
-
-func createAndRecordProblemDetail(ctx context.Context, status int, err error) ProblemDetailV1 {
-	title := http.StatusText(status)
-	span := trace.SpanFromContext(ctx)
-	var traceID string
-	if span.SpanContext().HasTraceID() {
-		traceID = span.SpanContext().TraceID().String()
-	}
-	if err != nil {
-		span.RecordError(err)
-	}
-	span.SetStatus(codes.Error, title)
-	requestURI, _ := ctx.Value(RequestURIKey{}).(string)
-
-	errText := title
-	if err != nil {
-		errText = fmt.Sprintf("%+v", err)
-	}
-
-	return ProblemDetailV1{
-		Instance: requestURI,
-		Status:   status,
-		Title:    title,
-		TraceID:  traceID,
-		Type:     "about:blank",
-		Detail:   errText,
-	}
-}
-
-type ProblemDetailV1 struct {
-	Detail   string `json:"detail"`
-	Instance string `json:"instance"`
-	Status   int    `json:"status"`
-	Title    string `json:"title"`
-	TraceID  string `json:"traceId"`
-	Type     string `json:"type"`
-}
 
 func NewHTTPClient(serverName string, middlewares ...HTTPClientMiddleware) *http.Client {
 	return NewHTTPClientWithTLS(serverName, nil, middlewares...)
@@ -176,9 +19,6 @@ func NewHTTPClientWithTLS(serverName string, tlsCfg *tls.Config, middlewares ...
 	var transport http.RoundTripper = otelhttp.NewTransport(
 		pooledTransport,
 		otelhttp.WithServerName(serverName),
-		otelhttp.WithMetricAttributesFn(func(r *http.Request) []attribute.KeyValue {
-			return labelClientRequest(serverName, r)
-		}),
 	)
 	for _, middleware := range middlewares {
 		transport = &middlewareRoundTripper{

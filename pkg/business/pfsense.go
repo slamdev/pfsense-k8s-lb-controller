@@ -1,5 +1,5 @@
 //nolint:unused
-package svc
+package business
 
 import (
 	"errors"

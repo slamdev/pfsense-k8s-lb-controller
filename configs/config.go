@@ -7,19 +7,18 @@ import (
 
 //nolint:revive
 type Config struct {
-	Actuator struct {
-		Port int32
-	}
 	Telemetry struct {
 		Logs struct {
 			Level  string
 			Format string
 		}
 		Metrics struct {
-			Output string // noop, stdout, remote
+			Enabled     bool
+			BindAddress string
 		}
-		Traces struct {
-			Output string // noop, stdout, remote
+		Health struct {
+			Enabled     bool
+			BindAddress string
 		}
 	}
 	Pfsense struct {

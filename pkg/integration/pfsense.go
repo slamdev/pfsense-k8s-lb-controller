@@ -1,13 +1,12 @@
 package integration
 
 import (
-	"context"
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
+	"net/http"
 
 	"alexejk.io/go-xmlrpc"
-	"github.com/alexliesenfeld/health"
 )
 
 func CreatePfsenseClient(url string, username string, password string, insecure bool) (*xmlrpc.Client, error) {
@@ -24,23 +23,20 @@ func CreatePfsenseClient(url string, username string, password string, insecure 
 	return c, nil
 }
 
-func PfsenseHealthCheck(client *xmlrpc.Client) health.Check {
-	return health.Check{
-		Name: "pfsense",
-		Check: func(_ context.Context) error {
-			req := &struct {
-				Dummy   string
-				Timeout int
-			}{
-				Dummy:   "dummy_value",
-				Timeout: 30,
-			}
-			res := &NestedXMLRPC[hostFirmwareVersionResponse]{}
-			if err := client.Call("pfsense.host_firmware_version", req, res); err != nil {
-				return fmt.Errorf("failed to make rpc call; %w", err)
-			}
-			return nil
-		},
+func PfsenseHealthCheck(client *xmlrpc.Client) func(req *http.Request) error {
+	return func(_ *http.Request) error {
+		req := &struct {
+			Dummy   string
+			Timeout int
+		}{
+			Dummy:   "dummy_value",
+			Timeout: 30,
+		}
+		res := &NestedXMLRPC[hostFirmwareVersionResponse]{}
+		if err := client.Call("pfsense.host_firmware_version", req, res); err != nil {
+			return fmt.Errorf("failed to make rpc call; %w", err)
+		}
+		return nil
 	}
 }
 

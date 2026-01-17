@@ -2,12 +2,12 @@
 package e2e
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
-	"strconv"
 	"testing"
 	"time"
 
@@ -46,22 +46,27 @@ func startApp() func() error {
 
 	os.Setenv("APP_PFSENSE_URL", pfsenseURL)
 
-	actuatorPort := testdata.GetFreePort()
-	os.Setenv("APP_ACTUATOR_PORT", strconv.Itoa(actuatorPort))
+	os.Setenv("APP_TELEMETRY_METRICS_ENABLED", "false")
 
-	app, err := pkg.NewApp()
+	healthPort := testdata.GetFreePort()
+	os.Setenv("APP_TELEMETRY_HEALTH_BINDADDRESS", fmt.Sprintf(":%d", healthPort))
+
+	app, err := pkg.NewManager()
 	if err != nil {
 		slog.Error("failed to start app", "err", err)
 		os.Exit(1)
 	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
 	go func() {
-		if err := app.Start(); err != nil {
+		if err := app.Start(ctx); err != nil {
 			slog.Error("failed to start app", "err", err)
 			os.Exit(1)
 		}
 	}()
 	for {
-		r, err := http.Get(fmt.Sprintf("http://localhost:%d/ready", actuatorPort)) //nolint:noctx
+		r, err := http.Get(fmt.Sprintf("http://localhost:%d/readyz", healthPort)) //nolint:noctx
 		if err == nil && r.StatusCode == http.StatusOK {
 			break
 		}
@@ -73,6 +78,7 @@ func startApp() func() error {
 
 	return func() error {
 		pfsenseCloseFunc()
-		return app.Stop()
+		cancel()
+		return nil
 	}
 }

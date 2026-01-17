@@ -5,31 +5,22 @@ import (
 	"os"
 
 	"github.com/slamdev/pfsense-k8s-lb-controller/pkg"
-	"github.com/slamdev/pfsense-k8s-lb-controller/pkg/integration"
+	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
 	_ "golang.org/x/mod/modfile" // transitive dependency that is not recognized by go mod tidy
 )
 
 func main() {
-	app, err := pkg.NewApp()
+	mgr, err := pkg.NewManager()
 	if err != nil {
-		slog.Error("failed to create app", "err", err)
+		slog.Error("failed to create manager", "err", err)
 		os.Exit(1)
 	}
 
-	go func() {
-		slog.Info("starting app")
-		if err := app.Start(); err != nil {
-			slog.Error("failed to start app", "err", err)
-			os.Exit(1)
-		}
-	}()
-	slog.Info("app is running")
-
-	if err := integration.WaitForShutdown(app.Stop); err != nil {
-		slog.Error("failed to stop app", "err", err)
+	if err := mgr.Start(signals.SetupSignalHandler()); err != nil {
+		slog.Error("unable to run manager", "err", err)
 		os.Exit(1)
 	}
 
-	slog.Info("app is stopped")
+	slog.Info("manager is stopped")
 }
