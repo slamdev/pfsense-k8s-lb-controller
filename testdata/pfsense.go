@@ -1,14 +1,18 @@
 package testdata
 
 import (
+	"context"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
-func MockPfsenseServer() (string, func()) {
+func MockPfsenseServer() (string, manager.RunnableFunc) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/xmlrpc.php", xmlrpcHandler)
 	srv := httptest.NewUnstartedServer(mux)
@@ -19,8 +23,14 @@ func MockPfsenseServer() (string, func()) {
 		panic(err)
 	}
 	srv.Listener = l
-	srv.Start()
-	return srv.URL, srv.Close
+
+	return "http://" + l.Addr().String(), func(ctx context.Context) error {
+		srv.Start()
+		<-ctx.Done()
+		srv.Close()
+		slog.InfoContext(ctx, "mock pfsense server stopped")
+		return nil
+	}
 }
 
 func xmlrpcHandler(w http.ResponseWriter, r *http.Request) {
