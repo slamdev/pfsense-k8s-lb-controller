@@ -42,11 +42,18 @@ func TestMain(m *testing.M) {
 }
 
 func startApp() error {
+	integration.ConfigureLogProvider(nil, "info", "text")
+
 	pfsenseURL, pfsenseStart := testdata.MockPfsenseServer()
-
 	os.Setenv("APP_PFSENSE_URL", pfsenseURL)
-	os.Setenv("APP_TELEMETRY_METRICS_ENABLED", "false")
 
+	kubeconfigPath, k8sStart, err := testdata.KubernetesCluster()
+	if err != nil {
+		return fmt.Errorf("failed to setup kubernetes cluster: %w", err)
+	}
+	os.Setenv("KUBECONFIG", kubeconfigPath)
+
+	os.Setenv("APP_TELEMETRY_METRICS_ENABLED", "false")
 	healthPort := testdata.GetFreePort()
 	os.Setenv("APP_TELEMETRY_HEALTH_BINDADDRESS", fmt.Sprintf(":%d", healthPort))
 
@@ -57,6 +64,10 @@ func startApp() error {
 
 	if err := mgr.Add(pfsenseStart); err != nil {
 		return fmt.Errorf("failed to add pfsense mock server to manager: %w", err)
+	}
+
+	if err := mgr.Add(k8sStart); err != nil {
+		return fmt.Errorf("failed to add kubernetes cluster to manager: %w", err)
 	}
 
 	go func() {
