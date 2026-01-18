@@ -2,8 +2,10 @@
 package business
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"alexejk.io/go-xmlrpc"
 	"github.com/slamdev/pfsense-k8s-lb-controller/pkg/integration"
@@ -14,13 +16,26 @@ type pfsenseService struct {
 	dryRun bool
 }
 
-type PfsenseService any
+type PfsenseService interface {
+	AllocateIP(ctx context.Context, namespace string, name string) (string, error)
+	ReleaseIP(ctx context.Context, ip string) error
+}
 
 func NewPfsenseService(client *xmlrpc.Client, dryRun bool) PfsenseService {
 	return &pfsenseService{
 		client: client,
 		dryRun: dryRun,
 	}
+}
+
+func (s *pfsenseService) AllocateIP(ctx context.Context, namespace string, name string) (string, error) {
+	slog.InfoContext(ctx, "allocating IP from pfsense", "namespace", namespace, "name", name)
+	return "10.3.1.1", nil
+}
+
+func (s *pfsenseService) ReleaseIP(ctx context.Context, ip string) error {
+	slog.InfoContext(ctx, "releasing IP back to pfsense", "ip", ip)
+	return nil
 }
 
 func (s *pfsenseService) execPhp(code string) error {

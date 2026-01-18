@@ -80,6 +80,8 @@ func startApp() error {
 		return fmt.Errorf("failed to wait for readyz endpoint: %w", err)
 	}
 
+	slog.Info("connect to cluster", "cmd", "KUBECONFIG="+kubeconfigPath+" kubectl get svc")
+
 	return nil
 }
 

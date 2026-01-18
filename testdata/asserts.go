@@ -42,7 +42,7 @@ func WaitFor[T any](t *testing.T, f func(c *assert.CollectT) (T, error)) T {
 	var failFastError error
 	require.EventuallyWithT(t, func(c *assert.CollectT) {
 		res, failFastError = f(c)
-	}, 4*time.Minute, 1*time.Second, "WaitFor method timed out after 4 minutes of retries")
+	}, 10*time.Second, 1*time.Second, "WaitFor method timed out after 4 minutes of retries")
 	require.NoErrorf(t, failFastError, "WaitFor method failed with error: %v", failFastError)
 	return res
 }
