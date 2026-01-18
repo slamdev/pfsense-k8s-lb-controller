@@ -33,14 +33,16 @@ func Test_should_work(t *testing.T) {
 			Type:              "LoadBalancer",
 			Ports: []corev1.ServicePort{
 				{
-					Name:       "http",
-					Port:       80,
-					TargetPort: intstr.FromInt32(8080),
+					Name:        "http",
+					Port:        80,
+					AppProtocol: integration.ToPointer("http"),
+					TargetPort:  intstr.FromInt32(8080),
 				},
 				{
-					Name:       "https",
-					Port:       443,
-					TargetPort: intstr.FromInt32(8443),
+					Name:        "https",
+					Port:        443,
+					AppProtocol: integration.ToPointer("https"),
+					TargetPort:  intstr.FromInt32(8443),
 				},
 			},
 		},
@@ -52,7 +54,34 @@ func Test_should_work(t *testing.T) {
 		if err != nil {
 			return corev1.Service{}, err
 		}
-		assert.NotEmpty(c, svc.Status.LoadBalancer.Ingress)
+		assert.Len(c, svc.Status.LoadBalancer.Ingress, 1)
+		if len(svc.Status.LoadBalancer.Ingress) == 1 {
+			assert.Len(c, svc.Status.LoadBalancer.Ingress[0].Ports, 2)
+		}
+		return *svc, nil
+	})
+
+	t.Logf("Service LoadBalancer Ingress: %+v", svc.Status.LoadBalancer.Ingress)
+
+	svc.Spec.Ports = append(svc.Spec.Ports, corev1.ServicePort{
+		Name:        "ssh",
+		Port:        22,
+		AppProtocol: integration.ToPointer("ssh"),
+		TargetPort:  intstr.FromInt32(8822),
+	})
+
+	_, err = k8s.CoreV1().Services("default").Update(t.Context(), &svc, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	svc = testdata.WaitFor(t, func(c *assert.CollectT) (corev1.Service, error) {
+		svc, err := k8s.CoreV1().Services("default").Get(t.Context(), svcName, metav1.GetOptions{})
+		if err != nil {
+			return corev1.Service{}, err
+		}
+		assert.Len(c, svc.Status.LoadBalancer.Ingress, 1)
+		if len(svc.Status.LoadBalancer.Ingress) == 1 {
+			assert.Len(c, svc.Status.LoadBalancer.Ingress[0].Ports, 3)
+		}
 		return *svc, nil
 	})
 

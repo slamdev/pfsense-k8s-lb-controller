@@ -11,13 +11,21 @@ import (
 	"github.com/slamdev/pfsense-k8s-lb-controller/pkg/integration"
 )
 
+type ServicePort struct {
+	Name        string  `json:"name,omitempty"`
+	Protocol    string  `json:"protocol,omitempty"`
+	AppProtocol *string `json:"appProtocol,omitempty"`
+	NodePort    int32   `json:"nodePort,omitempty"`
+}
+
 type pfsenseService struct {
 	client *xmlrpc.Client
 	dryRun bool
 }
 
 type PfsenseService interface {
-	AllocateIP(ctx context.Context, namespace string, name string) (string, error)
+	AllocateIP(ctx context.Context, namespace string, name string, ports []ServicePort) (string, error)
+	UpdatePorts(ctx context.Context, ip string, ports []ServicePort) error
 	ReleaseIP(ctx context.Context, ip string) error
 }
 
@@ -28,9 +36,14 @@ func NewPfsenseService(client *xmlrpc.Client, dryRun bool) PfsenseService {
 	}
 }
 
-func (s *pfsenseService) AllocateIP(ctx context.Context, namespace string, name string) (string, error) {
-	slog.InfoContext(ctx, "allocating IP from pfsense", "namespace", namespace, "name", name)
+func (s *pfsenseService) AllocateIP(ctx context.Context, namespace string, name string, ports []ServicePort) (string, error) {
+	slog.InfoContext(ctx, "allocating IP from pfsense", "namespace", namespace, "name", name, "ports", ports)
 	return "10.3.1.1", nil
+}
+
+func (s *pfsenseService) UpdatePorts(ctx context.Context, ip string, ports []ServicePort) error {
+	slog.InfoContext(ctx, "updating ports in pfsense", "ip", ip, "ports", ports)
+	return nil
 }
 
 func (s *pfsenseService) ReleaseIP(ctx context.Context, ip string) error {
