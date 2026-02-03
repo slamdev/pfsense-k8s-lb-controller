@@ -1,12 +1,14 @@
 package business
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/slamdev/pfsense-k8s-lb-controller/pkg/integration"
@@ -21,18 +23,20 @@ import (
 
 //nolint:unused
 type reconciler struct {
-	k8s     client.Client
-	pfsense PfsenseService
+	k8s                 client.Client
+	pfsense             PfsenseService
+	loadBalancerClass   string
+	finalizerName       string
+	portsHashAnnotation string
 }
 
-const finalizerName = "loadbalancer.example.com/ip-cleanup"
-const loadBalancerClass = "example.com/my-lb"
-const portsHashAnnotation = "loadbalancer.example.com/ports-hash"
-
-func NewReconciler(k8s client.Client, pfsense PfsenseService) reconcile.Reconciler {
+func NewReconciler(k8s client.Client, pfsense PfsenseService, loadBalancerClass string, finalizerName string, portsHashAnnotation string) reconcile.Reconciler {
 	return &reconciler{
-		k8s:     k8s,
-		pfsense: pfsense,
+		k8s:                 k8s,
+		pfsense:             pfsense,
+		loadBalancerClass:   loadBalancerClass,
+		finalizerName:       finalizerName,
+		portsHashAnnotation: portsHashAnnotation,
 	}
 }
 
@@ -49,7 +53,7 @@ func (r *reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Always handle deletion if we have a finalizer, even if service type changed
-	if controllerutil.ContainsFinalizer(&svc, finalizerName) {
+	if controllerutil.ContainsFinalizer(&svc, r.finalizerName) {
 		if !svc.DeletionTimestamp.IsZero() || !r.isOurService(&svc) {
 			return r.handleDeletion(ctx, &svc)
 		}
@@ -80,15 +84,15 @@ func (r *reconciler) isOurService(svc *corev1.Service) bool {
 	if svc.Spec.LoadBalancerClass == nil {
 		return false
 	}
-	return *svc.Spec.LoadBalancerClass == loadBalancerClass
+	return *svc.Spec.LoadBalancerClass == r.loadBalancerClass
 }
 
 func (r *reconciler) handleCreateOrUpdate(ctx context.Context, svc *corev1.Service) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	// Add finalizer if missing
-	if !controllerutil.ContainsFinalizer(svc, finalizerName) {
-		controllerutil.AddFinalizer(svc, finalizerName)
+	if !controllerutil.ContainsFinalizer(svc, r.finalizerName) {
+		controllerutil.AddFinalizer(svc, r.finalizerName)
 		if err := r.k8s.Update(ctx, svc); err != nil {
 			return ctrl.Result{}, fmt.Errorf("add finalizer: %w", err)
 		}
@@ -102,7 +106,7 @@ func (r *reconciler) handleCreateOrUpdate(ctx context.Context, svc *corev1.Servi
 
 	// Assign IP from external LB if not already assigned
 	if len(svc.Status.LoadBalancer.Ingress) == 0 {
-		ip, err := r.pfsense.AllocateIP(ctx, svc.Namespace, svc.Name, ports)
+		ip, err := r.pfsense.AllocateIP(ctx, svc.Namespace, svc.Name, svc.Spec.ClusterIP, ports)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("allocate IP: %w", err)
 		}
@@ -130,7 +134,7 @@ func (r *reconciler) handleCreateOrUpdate(ctx context.Context, svc *corev1.Servi
 		logger.V(0).Info("service already has load balancer IP", "ip", ip)
 
 		// Check if ports have changed
-		lastPortsHash := svc.Annotations[portsHashAnnotation]
+		lastPortsHash := svc.Annotations[r.portsHashAnnotation]
 		if lastPortsHash != currentPortsHash {
 			logger.V(0).Info("ports changed, updating pfsense", "ip", ip, "oldHash", lastPortsHash, "newHash", currentPortsHash)
 			if err := r.pfsense.UpdatePorts(ctx, ip, ports); err != nil {
@@ -152,7 +156,7 @@ func (r *reconciler) updateServicePorts(ctx context.Context, svc *corev1.Service
 	if svc.Annotations == nil {
 		svc.Annotations = make(map[string]string)
 	}
-	svc.Annotations[portsHashAnnotation] = hash
+	svc.Annotations[r.portsHashAnnotation] = hash
 
 	if len(ports) > 0 {
 		svc.Status.LoadBalancer.Ingress[0].Ports = r.toLoadBalancerIngressPorts(ports)
@@ -175,8 +179,12 @@ func extractServicePorts(svc *corev1.Service) []ServicePort {
 			Protocol:    string(p.Protocol),
 			AppProtocol: p.AppProtocol,
 			NodePort:    p.NodePort,
+			TargetPort:  p.Port,
 		})
 	}
+	slices.SortFunc(ports, func(a, b ServicePort) int {
+		return cmp.Compare(a.Name, b.Name)
+	})
 	return ports
 }
 
@@ -189,7 +197,7 @@ func computePortsHash(ports []ServicePort) string {
 func (r *reconciler) handleDeletion(ctx context.Context, svc *corev1.Service) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	if !controllerutil.ContainsFinalizer(svc, finalizerName) {
+	if !controllerutil.ContainsFinalizer(svc, r.finalizerName) {
 		logger.V(0).Info("no finalizer present on service, skipping deletion handling")
 		// No finalizer, nothing to clean up
 		return ctrl.Result{}, nil
@@ -207,7 +215,7 @@ func (r *reconciler) handleDeletion(ctx context.Context, svc *corev1.Service) (c
 	}
 
 	// Cleanup done — remove finalizer
-	controllerutil.RemoveFinalizer(svc, finalizerName)
+	controllerutil.RemoveFinalizer(svc, r.finalizerName)
 	if err := r.k8s.Update(ctx, svc); err != nil {
 		return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
 	}
@@ -219,7 +227,7 @@ func (r *reconciler) handleDeletion(ctx context.Context, svc *corev1.Service) (c
 func (r *reconciler) toLoadBalancerIngressPorts(ports []ServicePort) []corev1.PortStatus {
 	return integration.MapSlice(ports, func(p ServicePort) corev1.PortStatus {
 		return corev1.PortStatus{
-			Port:     p.NodePort,
+			Port:     p.TargetPort,
 			Protocol: corev1.Protocol(p.Protocol),
 		}
 	})

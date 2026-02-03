@@ -2,7 +2,10 @@ package configs
 
 import (
 	"fmt"
+	"net/netip"
 	"net/url"
+
+	"github.com/slamdev/pfsense-k8s-lb-controller/pkg/integration"
 )
 
 //nolint:revive
@@ -27,7 +30,16 @@ type Config struct {
 		Password string
 		Insecure bool
 	}
-	DryRun bool
+	Controller Controller
+}
+
+type Controller struct {
+	DryRun              bool
+	LoadBalancerClass   string
+	PortsHashAnnotation string
+	FinalizerName       string
+	Subnet              netip.Prefix
+	Exclusions          []integration.Range[netip.Addr]
 }
 
 type URL url.URL

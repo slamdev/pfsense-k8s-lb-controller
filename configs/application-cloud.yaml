@@ -2,4 +2,5 @@ telemetry:
   logs:
     level: INFO
     format: json
-dryRun: false
+controller:
+  dryRun: false

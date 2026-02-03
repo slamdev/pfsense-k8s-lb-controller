@@ -35,7 +35,7 @@ func NewManager() (ctrl.Manager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to configure pfsense client; %w", err)
 	}
-	pfsenseService := business.NewPfsenseService(pfsenseClient, appConfig.DryRun)
+	pfsenseService := business.NewPfsenseService(pfsenseClient, appConfig.Controller.DryRun, appConfig.Controller.Subnet, appConfig.Controller.Exclusions...)
 
 	kubecfg, err := config.GetConfig()
 	if err != nil {
@@ -75,7 +75,12 @@ func NewManager() (ctrl.Manager, error) {
 		return nil, fmt.Errorf("unable to set up health check in controller manager: %w", err)
 	}
 
-	reconciler := business.NewReconciler(mgr.GetClient(), pfsenseService)
+	reconciler := business.NewReconciler(
+		mgr.GetClient(), pfsenseService,
+		appConfig.Controller.LoadBalancerClass,
+		appConfig.Controller.FinalizerName,
+		appConfig.Controller.PortsHashAnnotation,
+	)
 
 	err = ctrl.
 		NewControllerManagedBy(mgr).

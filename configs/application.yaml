@@ -13,4 +13,12 @@ pfsense:
   insecure: true
   username: admin
   password: admin
-dryRun: true
+controller:
+  dryRun: true
+  loadBalancerClass: slamdev.net/pfsense-k8s-lb-controller
+  portsHashAnnotation: slamdev.net/pfsense-k8s-lb-controller-ports-hash
+  finalizerName: slamdev.net/pfsense-k8s-lb-controller-ip-cleanup
+  subnet: 150.150.150.0/24
+  exclusions:
+    - start: 150.150.150.0
+      end: 150.150.150.13

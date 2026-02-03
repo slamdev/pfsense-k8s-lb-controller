@@ -29,7 +29,7 @@ func Test_should_work(t *testing.T) {
 	_, err = k8s.CoreV1().Services("default").Create(t.Context(), &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: svcName},
 		Spec: corev1.ServiceSpec{
-			LoadBalancerClass: integration.ToPointer("example.com/my-lb"),
+			LoadBalancerClass: integration.ToPointer("slamdev.net/pfsense-k8s-lb-controller"),
 			Type:              "LoadBalancer",
 			Ports: []corev1.ServicePort{
 				{

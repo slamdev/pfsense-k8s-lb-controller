@@ -2,6 +2,7 @@ package testdata
 
 import (
 	"context"
+	"embed"
 	"io"
 	"log/slog"
 	"net"
@@ -11,6 +12,14 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
+
+//go:embed *.xml
+var PFSenseFS embed.FS
+
+var hostFirmwareVersionResponse string
+var acceptedResponse string
+var notFoundResponse string
+var backupConfigSectionResponse string
 
 func MockPfsenseServer() (string, manager.RunnableFunc) {
 	mux := http.NewServeMux()
@@ -25,6 +34,11 @@ func MockPfsenseServer() (string, manager.RunnableFunc) {
 	srv.Listener = l
 
 	return "http://" + l.Addr().String(), func(ctx context.Context) error {
+		backupConfigSectionResponse = loadResponse("backup_config_section.xml")
+		hostFirmwareVersionResponse = loadResponse("host_firmware_version.xml")
+		acceptedResponse = loadResponse("accepted.xml")
+		notFoundResponse = loadResponse("not_found.xml")
+
 		srv.Start()
 		<-ctx.Done()
 		srv.Close()
@@ -33,12 +47,25 @@ func MockPfsenseServer() (string, manager.RunnableFunc) {
 	}
 }
 
+func loadResponse(filename string) string {
+	b, err := PFSenseFS.ReadFile(filename)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
 func xmlrpcHandler(w http.ResponseWriter, r *http.Request) {
 	bytedata, _ := io.ReadAll(r.Body)
 	body := string(bytedata)
+	slog.InfoContext(r.Context(), "mock pfsense server received request", "body", body)
 	var response string
 	if strings.Contains(body, "pfsense.host_firmware_version") {
 		response = hostFirmwareVersionResponse
+	} else if strings.Contains(body, "pfsense.backup_config_section") {
+		response = backupConfigSectionResponse
+	} else if strings.Contains(body, "pfsense.restore_config_section") {
+		response = acceptedResponse
 	} else {
 		response = notFoundResponse
 	}
@@ -46,92 +73,3 @@ func xmlrpcHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
 	_, _ = w.Write([]byte(response))
 }
-
-const notFoundResponse = `
-<?xml version="1.0" encoding="UTF-8"?>
-<methodResponse>
-   <fault>
-      <value>
-         <struct>
-            <member>
-               <name>faultCode</name>
-               <value>
-                  <int>-32601</int>
-               </value>
-            </member>
-            <member>
-               <name>faultString</name>
-               <value>
-                  <string>server error. requested method not found</string>
-               </value>
-            </member>
-         </struct>
-      </value>
-   </fault>
-</methodResponse>
-`
-
-const hostFirmwareVersionResponse = `
-<?xml version="1.0" encoding="UTF-8"?>
-<methodResponse>
-   <params>
-      <param>
-         <value>
-            <struct>
-               <member>
-                  <name>firmware</name>
-                  <value>
-                     <struct>
-                        <member>
-                           <name>version</name>
-                           <value>
-                              <string>2.7.0-RELEASE</string>
-                           </value>
-                        </member>
-                     </struct>
-                  </value>
-               </member>
-               <member>
-                  <name>kernel</name>
-                  <value>
-                     <struct>
-                        <member>
-                           <name>version</name>
-                           <value>
-                              <string>14.0</string>
-                           </value>
-                        </member>
-                     </struct>
-                  </value>
-               </member>
-               <member>
-                  <name>base</name>
-                  <value>
-                     <struct>
-                        <member>
-                           <name>version</name>
-                           <value>
-                              <string>14.0</string>
-                           </value>
-                        </member>
-                     </struct>
-                  </value>
-               </member>
-               <member>
-                  <name>platform</name>
-                  <value>
-                     <string>pfSense</string>
-                  </value>
-               </member>
-               <member>
-                  <name>config_version</name>
-                  <value>
-                     <string>22.9</string>
-                  </value>
-               </member>
-            </struct>
-         </value>
-      </param>
-   </params>
-</methodResponse>
-`
